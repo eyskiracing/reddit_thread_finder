@@ -1,0 +1,7 @@
+# Development / audit tooling
+#
+# Install only when generating lockfiles, SBOMs, or vulnerability reports:
+# python -m pip install -r requirements-dev.txt
+#
+pip-audit>=2.10.0,<3.0.0
+cyclonedx-bom>=6.0.0,<8.0.0

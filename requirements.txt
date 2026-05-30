@@ -1,0 +1,10 @@
+# Runtime dependencies for Reddit Thread Finder Secure v8
+#
+# Security notes:
+# - sentence-transformers is pinned above the vulnerable <3.1.0 range.
+# - Upper bounds reduce untested major-version drift.
+# - Generate requirements.lock.txt locally after install for fully pinned versions.
+#
+praw>=7.7.1,<8.0.0
+python-dotenv>=1.0.1,<2.0.0
+sentence-transformers>=3.1.1,<4.0.0

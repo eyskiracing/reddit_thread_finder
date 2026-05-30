@@ -1,0 +1,266 @@
+{
+  "bomFormat": "CycloneDX",
+  "specVersion": "1.5",
+  "serialNumber": "urn:uuid:7aea7a19-f8a1-4407-83a6-5dec5b8ec87e",
+  "version": 1,
+  "metadata": {
+    "timestamp": "2026-05-29T23:16:11+00:00",
+    "tools": [
+      {
+        "vendor": "OpenAI",
+        "name": "ChatGPT",
+        "version": "GPT-5.5 Thinking"
+      }
+    ],
+    "component": {
+      "type": "application",
+      "name": "reddit_thread_finder_secure_v8_focus_builder",
+      "version": "0.8.0",
+      "description": "Modular local read-only Reddit thread link finder with generic pain-point search focus builder."
+    },
+    "properties": [
+      {
+        "name": "sbom.scope",
+        "value": "declared"
+      },
+      {
+        "name": "model.name",
+        "value": "sentence-transformers/all-MiniLM-L6-v2"
+      },
+      {
+        "name": "model.revision",
+        "value": "c9745ed1d9f207416be6d2e6f8de32d1f16199bf"
+      }
+    ]
+  },
+  "components": [
+    {
+      "type": "application",
+      "name": "reddit_thread_finder.py",
+      "version": "local",
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "name": "praw",
+      "version": ">=7.7.1,<8.0.0",
+      "purl": "pkg:pypi/praw",
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "name": "python-dotenv",
+      "version": ">=1.0.1,<2.0.0",
+      "purl": "pkg:pypi/python-dotenv",
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "name": "sentence-transformers",
+      "version": ">=3.1.1,<4.0.0",
+      "purl": "pkg:pypi/sentence-transformers",
+      "scope": "required"
+    },
+    {
+      "type": "library",
+      "name": "pip-audit",
+      "version": ">=2.10.0,<3.0.0",
+      "purl": "pkg:pypi/pip-audit",
+      "scope": "optional"
+    },
+    {
+      "type": "library",
+      "name": "cyclonedx-bom",
+      "version": ">=6.0.0,<8.0.0",
+      "purl": "pkg:pypi/cyclonedx-bom",
+      "scope": "optional"
+    },
+    {
+      "type": "file",
+      "name": "sentence-transformers/all-MiniLM-L6-v2",
+      "version": "c9745ed1d9f207416be6d2e6f8de32d1f16199bf",
+      "scope": "required",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2"
+        }
+      ]
+    },
+    {
+      "type": "framework",
+      "name": "Python",
+      "version": ">=3.10 recommended",
+      "scope": "required"
+    },
+    {
+      "type": "operating-system",
+      "name": "macOS / Linux / Windows",
+      "version": "modern supported OS",
+      "scope": "required"
+    },
+    {
+      "type": "application",
+      "name": "reddit_thread_finder_core/constants.py",
+      "version": "local",
+      "scope": "required"
+    },
+    {
+      "type": "application",
+      "name": "reddit_thread_finder_core/models.py",
+      "version": "local",
+      "scope": "required"
+    },
+    {
+      "type": "application",
+      "name": "reddit_thread_finder_core/text_utils.py",
+      "version": "local",
+      "scope": "required"
+    },
+    {
+      "type": "application",
+      "name": "reddit_thread_finder_core/validation.py",
+      "version": "local",
+      "scope": "required"
+    },
+    {
+      "type": "application",
+      "name": "reddit_thread_finder_core/security.py",
+      "version": "local",
+      "scope": "required"
+    },
+    {
+      "type": "application",
+      "name": "reddit_thread_finder_core/query.py",
+      "version": "local",
+      "scope": "required"
+    },
+    {
+      "type": "application",
+      "name": "reddit_thread_finder_core/reddit_search.py",
+      "version": "local",
+      "scope": "required"
+    },
+    {
+      "type": "application",
+      "name": "reddit_thread_finder_core/scoring.py",
+      "version": "local",
+      "scope": "required"
+    },
+    {
+      "type": "application",
+      "name": "reddit_thread_finder_core/output.py",
+      "version": "local",
+      "scope": "required"
+    },
+    {
+      "type": "application",
+      "name": "reddit_thread_finder_core/cli.py",
+      "version": "local",
+      "scope": "required"
+    },
+    {
+      "type": "file",
+      "name": "QUICKSTART_NON_TECHNICAL.md",
+      "version": "local",
+      "scope": "required",
+      "description": "Local user guidance or helper script; no third-party dependency added."
+    },
+    {
+      "type": "file",
+      "name": "setup_mac.command",
+      "version": "local",
+      "scope": "required",
+      "description": "Local user guidance or helper script; no third-party dependency added."
+    },
+    {
+      "type": "file",
+      "name": "run_mac.command",
+      "version": "local",
+      "scope": "required",
+      "description": "Local user guidance or helper script; no third-party dependency added."
+    },
+    {
+      "type": "file",
+      "name": "setup_windows.bat",
+      "version": "local",
+      "scope": "required",
+      "description": "Local user guidance or helper script; no third-party dependency added."
+    },
+    {
+      "type": "file",
+      "name": "run_windows.bat",
+      "version": "local",
+      "scope": "required",
+      "description": "Local user guidance or helper script; no third-party dependency added."
+    },
+    {
+      "type": "application",
+      "name": "reddit_thread_finder_core/focus.py",
+      "version": "local",
+      "scope": "required",
+      "description": "Local deterministic product-agnostic pain-point search focus builder."
+    }
+  ],
+  "services": [
+    {
+      "name": "Reddit API",
+      "provider": {
+        "name": "Reddit"
+      },
+      "description": "Read-only Reddit search and metadata retrieval.",
+      "endpoints": [
+        "https://oauth.reddit.com"
+      ]
+    },
+    {
+      "name": "Hugging Face Hub",
+      "provider": {
+        "name": "Hugging Face"
+      },
+      "description": "Pinned model revision download if not cached.",
+      "endpoints": [
+        "https://huggingface.co"
+      ]
+    },
+    {
+      "name": "PyPI",
+      "provider": {
+        "name": "Python Packaging Authority / PyPI"
+      },
+      "description": "Python package installation.",
+      "endpoints": [
+        "https://pypi.org"
+      ]
+    }
+  ],
+  "dependencies": [
+    {
+      "ref": "reddit_thread_finder_secure_v3",
+      "dependsOn": [
+        "pkg:pypi/praw",
+        "pkg:pypi/python-dotenv",
+        "pkg:pypi/sentence-transformers"
+      ]
+    },
+    {
+      "ref": "pkg:pypi/sentence-transformers",
+      "dependsOn": [
+        "pkg:pypi/transformers",
+        "pkg:pypi/torch",
+        "pkg:pypi/huggingface-hub",
+        "pkg:pypi/scikit-learn",
+        "pkg:pypi/scipy",
+        "pkg:pypi/numpy",
+        "pkg:pypi/tqdm"
+      ]
+    },
+    {
+      "ref": "development-tools",
+      "dependsOn": [
+        "pkg:pypi/pip-audit",
+        "pkg:pypi/cyclonedx-bom"
+      ]
+    }
+  ]
+}
