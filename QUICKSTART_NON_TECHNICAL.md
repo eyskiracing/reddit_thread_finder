@@ -1,16 +1,22 @@
 # Quickstart for Non-Technical Users
 
-Generated: 2026-05-29T20:52:39+00:00
-
 This guide is for people who want to **use** the Reddit Thread Finder without needing to understand all of the technical details.
 
-The full technical documentation is still available in:
+The full technical documentation is in:
 
 ```text
 README.md
 SECURITY.md
 SBOM.md
 ```
+
+---
+
+## Good news — no Reddit account needed
+
+Previous versions of this tool required you to create a Reddit developer account, apply for API access, and fill in a credentials file. That process is no longer needed.
+
+This version uses a free public data source called Arctic Shift. You can just install and run.
 
 ---
 
@@ -50,70 +56,33 @@ It only finds thread links and lightweight metadata.
 
 ## What you need before you start
 
-You need four things:
+Three things:
 
 ```text
 1. Python installed on your computer
-2. Reddit API credentials
-3. The downloaded project folder
-4. Terminal on Mac / Command Prompt or PowerShell on Windows
+2. The downloaded project folder
+3. Terminal on Mac or Command Prompt on Windows
 ```
 
-You do **not** need to give this tool your Reddit password.
+You do **not** need a Reddit account.
+You do **not** need any API credentials.
+You do **not** need to fill in any configuration files.
 
 ---
 
-## Step 1 — Unzip the project
+## Step 1 — Get the project
 
-Unzip the downloaded file.
-
-You should see a folder named something like:
+Download or clone from GitHub:
 
 ```text
-reddit_thread_finder_secure_v7_easy_start
+https://github.com/Eyskiracing/reddit-thread-finder
 ```
 
-Open that folder.
+Make sure you are on the `arctic-shift-backend` branch.
 
 ---
 
-## Step 2 — Add your Reddit API credentials
-
-Inside the folder, find this file:
-
-```text
-.env.example
-```
-
-Make a copy of it and rename the copy to:
-
-```text
-.env
-```
-
-Open `.env` in a text editor and fill in these three values:
-
-```text
-REDDIT_CLIENT_ID=
-REDDIT_CLIENT_SECRET=
-REDDIT_USER_AGENT=
-```
-
-Example:
-
-```text
-REDDIT_CLIENT_ID=abc123
-REDDIT_CLIENT_SECRET=xyz789
-REDDIT_USER_AGENT=reddit-thread-finder/0.1 by u/yourusername
-```
-
-Do **not** add your Reddit password.
-
-Do **not** share your `.env` file.
-
----
-
-## Step 3 — Run the setup script
+## Step 2 — Run the setup script
 
 ### On Mac
 
@@ -123,7 +92,7 @@ Double-click:
 setup_mac.command
 ```
 
-If double-clicking does not work, open Terminal, go to the project folder, and run:
+If double-clicking does not work, open Terminal, navigate to the project folder, and run:
 
 ```bash
 ./setup_mac.command
@@ -137,11 +106,9 @@ Double-click:
 setup_windows.bat
 ```
 
-You can also run it from Command Prompt or PowerShell.
-
 ---
 
-## Step 4 — Run your first search
+## Step 3 — Run your first search
 
 ### On Mac
 
@@ -159,151 +126,77 @@ Double-click:
 run_windows.bat
 ```
 
-The tool will ask you questions. It will first help you narrow the pain point into a better Reddit search.
-
 ---
 
-## New first step — Focus the pain point
+## What happens when you run it
 
-The tool will ask a few questions before it searches Reddit.
+The tool guides you through a few steps:
 
-This is because broad searches usually return noisy results.
+**Step 1 — Describe the pain point**
 
-Use this structure:
+Enter the problem you want to find discussions about in plain language.
 
-```text
-[Who has the problem] is trying to [do what], but [current friction] makes it hard to [get desired outcome].
-```
+**Step 2 — Narrow the search (Focus Builder)**
 
-Example:
-
-```text
-Small ecommerce operators are trying to track returns and refund status, but they have to check Shopify, warehouse emails, and spreadsheets manually to know which customers are waiting for refunds.
-```
-
-Another example:
-
-```text
-Product managers are trying to find repeated feature requests, but feedback is scattered across Slack, sales notes, calls, and support tickets.
-```
-
-The tool may ask:
+The tool asks a few optional questions to help make the search more specific:
 
 ```text
 Who has this problem?
 What are they trying to do?
 What makes it painful today?
-What outcome do they want instead?
-Any words that must be included?
-Any words or topics to avoid?
+What outcome do they want?
+Any words to include?
+Any words to avoid?
 ```
 
-Press Enter to skip any question you do not know.
+Press Enter to skip any question.
+
+**Step 3 — Subreddit discovery**
+
+The tool automatically finds relevant Reddit communities for your topic and shows you a list:
+
+```text
+Suggested subreddits to search:
+  1. r/customerservice     (relevance: high)
+  2. r/sysadmin            (relevance: high)
+  3. r/helpdesk            (relevance: medium)
+  4. r/startups            (relevance: medium)
+
+Search all of these? [Y/n]
+```
+
+Press Enter to search all of them, or type numbers to remove any you do not want.
+
+**Step 4 — Set search parameters**
+
+```text
+Search from what date? (YYYY-MM-DD)
+Minimum match score? (0.0 to 1.0)
+How many links to return?
+```
+
+**Step 5 — Results**
+
+The tool returns a list of Reddit thread links with scores. Open them in your browser and read them yourself.
 
 ---
 
-## What the questions mean
-
-### “What pain point are you looking for?”
-
-Enter the problem you want to find discussions about.
-
-Example:
+## Recommended starting settings
 
 ```text
-small businesses struggling with SOC 2 evidence collection
+From date:      2026-01-01
+Minimum score:  0.70
+Number of links: 25
 ```
 
-### “Search from what date?”
-
-Enter a date in this format:
-
-```text
-YYYY-MM-DD
-```
-
-Example:
-
-```text
-2026-01-01
-```
-
-This means the tool will look for threads from January 1, 2026 through today.
-
-### “Minimum semantic match score?”
-
-This controls how strict the match should be.
-
-Use:
-
-```text
-0.60 = broader search
-0.70 = balanced search
-0.80 = stricter search
-```
-
-Recommended starting point:
-
-```text
-0.70
-```
-
-### “How many thread links should be returned?”
-
-This is how many results you want.
-
-Recommended starting point:
-
-```text
-25
-```
-
-The maximum is:
-
-```text
-100
-```
-
-### “Search which subreddit(s)?”
-
-You can press Enter to search all Reddit.
-
-Or you can enter a few subreddits separated by commas.
-
-Example:
-
-```text
-startups,cybersecurity,sysadmin,compliance
-```
-
-Maximum:
-
-```text
-5 subreddits
-```
+For a broader search: `0.60`
+For a stricter search: `0.80`
 
 ---
 
-## Recommended first search
+## Note on data recency
 
-When prompted, try:
-
-```text
-Pain point:
-small businesses struggling with SOC 2 evidence collection
-
-From date:
-2026-01-01
-
-Minimum score:
-0.70
-
-Number of links:
-25
-
-Subreddits:
-all
-```
+This version uses archived Reddit data that may be 2–4 weeks behind real-time. If you search from a very recent date, you may get fewer results than expected. Try searching from an earlier date if results seem sparse.
 
 ---
 
@@ -312,147 +205,60 @@ all
 Each result includes:
 
 ```text
-Title
-Subreddit
-Date
-Semantic score
-Composite score
-Pain signal
-Reddit score
-Number of comments
-URL
-Matched search queries
+Title           — the thread title
+Subreddit       — which Reddit community it is in
+Date            — when it was posted
+Semantic score  — how closely it matches your topic
+Composite score — overall ranking
+Pain signal     — whether it sounds like someone describing a problem
+Reddit score    — how many upvotes the thread received
+Comments        — how many replies it has
+URL             — the link to open in your browser
 ```
 
-### Semantic score
-
-How closely the thread title matches your topic.
-
-Higher is better.
-
-### Pain signal
-
-Whether the title sounds like someone is describing a problem.
-
-Higher may mean the thread is more useful for human review.
-
-### Composite score
-
-The overall ranking score.
-
-This combines:
-
-```text
-semantic match
-pain signal
-engagement
-recency
-```
-
-### URL
-
-This is the Reddit thread link.
-
-Open it in your browser and read the thread yourself.
+Open the URL and read the thread yourself before deciding whether to respond.
 
 ---
 
 ## What to do after you find a thread
 
-Before replying:
-
 ```text
 1. Open the thread.
 2. Read the full conversation.
 3. Check the subreddit rules.
-4. Decide whether your response would actually be useful.
+4. Decide whether your response would be useful.
 5. Disclose your affiliation if relevant.
 6. Respond as a human.
 7. Do not spam communities.
 8. Do not paste automated replies.
 ```
 
-The goal is to find places where a thoughtful human response may be appropriate.
-
 ---
 
 ## If something goes wrong
 
-### “Missing required environment variables”
+### "No matching threads found"
 
-Your `.env` file is missing one of these:
-
-```text
-REDDIT_CLIENT_ID
-REDDIT_CLIENT_SECRET
-REDDIT_USER_AGENT
-```
-
-Open `.env` and make sure all three are filled in.
-
----
-
-### “Python was not found”
-
-Python may not be installed or may not be available from your command line.
-
-Install Python, then run the setup script again.
-
----
-
-### “No matching threads found”
-
-Try one of these:
+Try:
 
 ```text
-lower the minimum score from 0.80 to 0.70
-use a broader topic
-search from an earlier date
-search all Reddit instead of specific subreddits
-increase the number of links requested
+Lower the minimum score from 0.70 to 0.60
+Search from an earlier date
+Accept more subreddits in the discovery step
+Use a broader topic description
 ```
 
----
+### "Could not reach Arctic Shift"
 
-### “Rate limit”
+The data service may be temporarily unavailable. Try again in a few minutes.
 
-The tool is slowing down because Reddit is asking it to wait.
+### "Python was not found"
 
-This is normal.
-
-Try again later or use a smaller search.
-
----
+Python may not be installed. Install Python 3.10 or later and run the setup script again.
 
 ### First run is slow
 
-The first run may download the semantic matching model.
-
-After that, it should usually be faster.
-
----
-
-## Good default settings
-
-Use these as a starting point:
-
-```text
-Minimum score: 0.70
-Number of links: 25
-Subreddits: all
-```
-
-For a broader search:
-
-```text
-Minimum score: 0.60
-```
-
-For a stricter search:
-
-```text
-Minimum score: 0.80
-```
+The first run downloads the semantic matching model (about 80MB). After that, it runs faster.
 
 ---
 

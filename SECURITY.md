@@ -1,83 +1,95 @@
 # Security Notes
 
-This tool is designed to run locally from your Terminal and use Reddit API credentials safely.
+## Branch context
 
-## Credential handling
+This is the `arctic-shift-backend` branch. It uses the Arctic Shift public API instead of the Reddit official API.
 
-Use a local `.env` file or environment variables.
+For the credential-based Reddit API version, see the `main` branch.
 
-Do **not**:
-- hard-code credentials in Python files
-- pass credentials as command-line arguments
-- commit `.env` to Git
-- paste credentials into shared docs, prompts, screenshots, or logs
-- use a Reddit username/password for this read-only tool
+---
 
-The tool only needs:
+## Security changes in this branch vs main
 
-```bash
-REDDIT_CLIENT_ID=
-REDDIT_CLIENT_SECRET=
-REDDIT_USER_AGENT=
+### Removed
+
+| Item | Reason |
+|---|---|
+| `.env` file and credential handling | No credentials needed — Arctic Shift requires no API key |
+| `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT` | Not used |
+| `warn_if_env_file_permissions_are_loose()` | No credentials to protect at rest |
+| `_warn_if_user_agent_format_invalid()` | No User-Agent requirement |
+| `praw` dependency | Replaced by direct HTTP requests |
+| `python-dotenv` dependency | No `.env` file to load |
+| Read-only Reddit client enforced via `reddit.read_only = True` | No Reddit client exists; Arctic Shift is read-only by design |
+
+### Added
+
+| Item | Purpose |
+|---|---|
+| HTTP response validation | Validates structure, types, and field presence of all Arctic Shift API responses before they enter the pipeline |
+| URL construction validation | Prevents user-supplied subreddit names and query strings from injecting unexpected parameters into HTTP requests |
+| Third-party server trust disclosure | Documented below; users are informed of the dependency |
+| `X-RateLimit-Remaining` header monitoring | Backs off when Arctic Shift rate limit is approaching |
+
+### Carried forward unchanged
+
+| Item | Notes |
+|---|---|
+| Rate limit backoff logic | Adapted from PRAW version; same pattern, different trigger |
+| Output contract validation | JSON export still validates against allowed/disallowed field schema |
+| Path traversal protection on `--json-output` | Unchanged |
+| Semantic model pinned revision | Unchanged |
+| `trust_remote_code=False` | Unchanged |
+| Abuse-prevention caps | Unchanged; `MAX_SUBREDDITS` increased from 5 to 10 to support discovery results |
+
+---
+
+## Third-party server trust
+
+This branch sends HTTP requests to:
+
+```text
+https://arctic-shift.photon-reddit.com
 ```
 
-It does **not** need:
+Arctic Shift is an independent open source project. It is not affiliated with Reddit.
 
-```bash
-REDDIT_USERNAME=
-REDDIT_PASSWORD=
+**Risks to be aware of:**
+
+**Availability** — Arctic Shift is maintained by one developer. If the server is unavailable, the tool fails with a clear error message rather than silently retrying forever.
+
+**Data integrity** — The tool parses JSON from a third-party server it does not control. All responses are validated for structure and field types before use. If a response is malformed or contains unexpected fields, the tool raises a clear error rather than processing unknown data.
+
+**No sensitive data is sent** — Requests contain only search query strings and subreddit names. No personal data, credentials, or user account information is transmitted.
+
+**Mitigation summary:**
+
+```text
+- HTTP response validation on all API responses
+- URL construction validation on all user inputs before request
+- Rate limit header monitoring
+- Clear error messages on server unavailability
+- No credentials or personal data in requests
+- Open source server code is publicly auditable
 ```
 
-## Recommended local setup
+---
 
-Create `.env` from the example:
+## No credentials
 
-```bash
-cp .env.example .env
-```
+This branch has no credential attack surface.
 
-Set restrictive file permissions on macOS/Linux:
+There is no `.env` file, no API key, no client secret, and no OAuth token. The tool makes unauthenticated read-only HTTP requests to a public API.
 
-```bash
-chmod 600 .env
-```
+This eliminates the most common real-world risk for tools like this: accidentally committing credentials to a public GitHub repository.
 
-The `.gitignore` file prevents `.env` and common secret files from being committed.
-
-## Least privilege
-
-Create a dedicated Reddit API app for this tool.
-
-Use it only for read-only search. This code does not contain posting, commenting, voting, messaging, or moderation functions.
+---
 
 ## Output safety
 
-JSON output contains links and lightweight metadata only. It does not include Reddit thread bodies or comments.
+JSON output contains links and lightweight metadata only.
 
-
-## v2 hardening
-
-The v2 version adds several additional controls:
-
-### Forced read-only mode
-
-The Reddit client is explicitly set to:
-
-```python
-reddit.read_only = True
-```
-
-This reinforces that the script is only for discovering links and cannot drift into posting, commenting, voting, or messaging behavior without deliberate code changes.
-
-### Rate-limit backoff
-
-The script detects common 429 / rate-limit cases and waits before retrying. Retries are capped so the script does not aggressively hammer the API.
-
-### Output contract
-
-Before writing JSON, the script validates that output fields are limited to safe metadata fields only.
-
-Disallowed fields include:
+Disallowed output fields remain enforced:
 
 ```text
 author
@@ -90,127 +102,83 @@ content
 text_preview
 ```
 
-### Tests
+The output contract validation fails closed — if an unexpected field appears, JSON export raises an error rather than silently writing it.
 
-The included tests check that:
-- `MAX_TOP_K` remains 100
-- query expansion remains capped
-- allowed sort modes remain conservative
-- exported result fields exclude body, author, and comments
+---
 
+## HTTP request safety
 
-## v3 dependency hardening
+All outbound HTTP requests:
 
-The v3 package addresses the SBOM concerns identified in review:
+- go only to `arctic-shift.photon-reddit.com`
+- use HTTPS
+- include a descriptive `User-Agent` header identifying the tool
+- are read-only GET requests
+- do not transmit personal data
 
-### `sentence-transformers` vulnerable range blocked
+---
 
-`requirements.txt` now requires:
+## Rate-limit behavior
+
+The tool monitors the `X-RateLimit-Remaining` header from Arctic Shift responses. When the remaining budget is low, the tool backs off before continuing. If a `429` response is received, the tool waits and retries with a cap on maximum retries.
+
+Arctic Shift's rate limits are lenient for normal use. The tool's abuse-prevention caps on search operations and candidate limits provide an additional layer of protection against excessive requests.
+
+---
+
+## Dependency security
+
+Runtime dependencies in this branch:
 
 ```text
+requests>=2.31.0,<3.0.0
 sentence-transformers>=3.1.1,<4.0.0
 ```
 
-This blocks the vulnerable `<3.1.0` range associated with unsafe PyTorch model loading.
+`praw` and `python-dotenv` are not present in this branch.
 
-### Model revision pinned
+The `sentence-transformers` minimum blocks the vulnerable `<3.1.0` range.
 
-The semantic model is pinned to a specific Hugging Face repository SHA:
+Run a local audit after installation:
 
-```text
-MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
-MODEL_REVISION = "c9745ed1d9f207416be6d2e6f8de32d1f16199bf"
+```bash
+./scripts/audit_dependencies.sh
 ```
 
-The code also passes:
+---
+
+## Model supply-chain hardening
 
 ```python
-trust_remote_code=False
+MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2"
+MODEL_REVISION = "c9745ed1d9f207416be6d2e6f8de32d1f16199bf"
+trust_remote_code = False
 ```
 
-when loading the model.
-
-### Local audit workflow added
-
-The package includes:
-
-```text
-requirements-dev.txt
-scripts/audit_dependencies.sh
-scripts/generate_lockfile.sh
-scripts/generate_resolved_sbom.sh
-```
-
-Use these from a clean virtual environment to create a pinned local lockfile, run `pip-audit`, and generate a fully resolved CycloneDX SBOM.
-
-
-## README alignment
-
-The README has been expanded to include all major operational and security caveats discussed during project design, including:
-
-- local audit limitations
-- credential handling
-- `.env` file security
-- read-only mode
-- abuse-prevention limits
-- rate-limit behavior
-- SBOM limitations
-- vulnerability audit workflow
-- model revision pinning
-- human response guardrails
-- Reddit API usage boundaries
-
-The README should be treated as the primary user-facing operating guide.
-
+---
 
 ## Code annotation
 
-The main script now includes module-level and function-level documentation explaining:
-
-- the purpose and non-goals of the tool
-- why Reddit is used in read-only mode
-- why thread bodies and comments are not retrieved
-- why output schema validation fails closed
-- why candidate/search/result limits exist
-- how semantic and composite scoring are used
-
-
-## v6 modularization
-
-The v6 package keeps the same security posture but separates the code into focused modules.
-
-Security-sensitive logic is easier to review because it lives in predictable places:
+Security-sensitive logic lives in:
 
 ```text
-reddit_thread_finder_core/security.py
-reddit_thread_finder_core/models.py
-reddit_thread_finder_core/output.py
-reddit_thread_finder_core/constants.py
-reddit_thread_finder_core/reddit_search.py
+reddit_thread_finder_core/security.py    HTTP validation, rate limit backoff
+reddit_thread_finder_core/models.py      output schema contract
+reddit_thread_finder_core/output.py      JSON export validation, path traversal protection
+reddit_thread_finder_core/constants.py   Arctic Shift base URL, abuse-prevention limits
+reddit_thread_finder_core/reddit_search.py HTTP request construction and response handling
+reddit_thread_finder_core/discovery.py  subreddit discovery HTTP requests and validation
 ```
 
-The root `reddit_thread_finder.py` file is now only a thin entrypoint.
+---
 
+## What this tool does not do
 
-## Non-technical quickstart and launchers
+This tool does not:
 
-v7 adds a user-facing quickstart and simple setup/run scripts:
-
-```text
-QUICKSTART_NON_TECHNICAL.md
-setup_mac.command
-run_mac.command
-setup_windows.bat
-run_windows.bat
-```
-
-These scripts do not add new capabilities. They only make the same local setup and run workflow easier for non-technical users.
-
-
-## v8 focus builder
-
-The v8 focus builder does not add external services or LLM calls.
-
-It is a local, deterministic prompt-and-rewrite workflow that helps users provide
-more specific pain-point search criteria. It remains product-agnostic and does
-not assume any compliance, security, or GRC use case.
+- post, comment, vote, message, or moderate on Reddit
+- collect Reddit usernames, thread bodies, or comments
+- store data beyond the current session
+- send user data to any external service
+- run background processes or scheduled jobs
+- require or request any user account credentials
