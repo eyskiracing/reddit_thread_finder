@@ -1,141 +1,136 @@
-"""Credential handling, .env checks, and Reddit client creation."""
+"""HTTP response validation and rate-limit backoff for Arctic Shift API calls.
+
+This module replaces the credential-handling and Reddit client setup from the
+main branch. There are no credentials, no .env file, and no Reddit client in
+this branch.
+
+Security responsibilities in this module:
+- Validate all Arctic Shift API responses before they enter the pipeline
+- Back off gracefully when rate limits are encountered
+- Never transmit personal data or credentials in requests
+"""
 
 from __future__ import annotations
 
-import os
-import re
-import stat
 import time
-from pathlib import Path
-
-import praw
-from dotenv import load_dotenv
+from typing import Any
 
 from .constants import DEFAULT_RATE_LIMIT_BACKOFF_SECONDS, MAX_RATE_LIMIT_RETRIES
 
-# Resolve .env path relative to the package root, not the caller's CWD.
-# This ensures the file is found and permission-checked regardless of
-# which directory the user launches the tool from.
-_ENV_PATH = Path(__file__).parent.parent / ".env"
 
-# Reddit's required User-Agent format:
-# <platform>:<app_id>:<version> (by /u/<username>)
-# https://github.com/reddit-archive/reddit/wiki/API
-_USER_AGENT_PATTERN = re.compile(r".+:.+:.+\s+\(by /u/.+\)")
+# ---------------------------------------------------------------------------
+# HTTP response validation
+# ---------------------------------------------------------------------------
 
-
-def warn_if_env_file_permissions_are_loose(env_path: str = str(_ENV_PATH)) -> None:
+def validate_arctic_shift_response(response_json: Any, endpoint: str) -> dict:
     """
-    Warn when .env is readable by group/other users on macOS/Linux.
+    Validate an Arctic Shift API response before it enters the pipeline.
 
-    This is a local safety check only. Windows permissions are managed differently,
-    so the check is skipped there.
+    This function fails closed: if the response is not a dict, does not contain
+    the expected 'data' key, or contains unexpected top-level structure, it raises
+    a clear error rather than passing unknown data downstream.
+
+    We parse JSON from a third-party server we do not control. Validating the
+    structure here means the rest of the codebase can trust the shape of the data.
     """
-    path = Path(env_path)
-
-    if not path.exists():
-        return
-
-    if os.name == "nt":
-        return
-
-    mode = path.stat().st_mode
-
-    group_or_other_can_read = bool(mode & (stat.S_IRGRP | stat.S_IROTH))
-    group_or_other_can_write = bool(mode & (stat.S_IWGRP | stat.S_IWOTH))
-
-    if group_or_other_can_read or group_or_other_can_write:
-        print(
-            "Security warning: your .env file may be readable or writable by "
-            "other local users. Recommended fix: chmod 600 .env"
+    if not isinstance(response_json, dict):
+        raise ValueError(
+            f"Arctic Shift response from {endpoint} was not a JSON object. "
+            f"Got type: {type(response_json).__name__}"
         )
 
-
-def _warn_if_user_agent_format_invalid(user_agent: str) -> None:
-    """
-    Warn when REDDIT_USER_AGENT does not follow Reddit's required API format.
-
-    Reddit requires: <platform>:<app_id>:<version> (by /u/<username>)
-    Non-compliant User-Agents may result in request throttling or bans.
-    See: https://github.com/reddit-archive/reddit/wiki/API
-    """
-    if not _USER_AGENT_PATTERN.match(user_agent):
-        print(
-            "Compliance warning: REDDIT_USER_AGENT does not follow Reddit's "
-            "required format: '<platform>:<app_id>:<version> (by /u/<username>)'. "
-            "Example: script:com.yourname.reddit-thread-finder:v0.1.0 (by /u/yourusername). "
-            "Non-compliant User-Agents may be throttled. "
-            "See: https://github.com/reddit-archive/reddit/wiki/API"
+    if "data" not in response_json:
+        error_msg = response_json.get("error") or response_json.get("message") or "unknown"
+        raise ValueError(
+            f"Arctic Shift response from {endpoint} missing 'data' field. "
+            f"Server message: {error_msg}"
         )
 
+    data = response_json["data"]
 
-def get_reddit_client() -> praw.Reddit:
+    if not isinstance(data, list):
+        raise ValueError(
+            f"Arctic Shift response 'data' from {endpoint} was not a list. "
+            f"Got type: {type(data).__name__}"
+        )
+
+    return response_json
+
+
+def validate_post_fields(post: Any, endpoint: str) -> dict:
     """
-    Create a PRAW Reddit client using local environment variables.
+    Validate that a single post object from Arctic Shift has expected fields.
 
-    The .env file is resolved relative to the project root, not the caller's
-    working directory. The client is forced into read-only mode — even if future
-    code accidentally introduces write-capable methods, the Reddit client will
-    not be authenticated for posting or commenting.
+    We check for required fields and type-check the ones we use in scoring.
+    Unexpected extra fields are ignored rather than rejected — the API may
+    return more fields than we use, and that is fine.
+
+    Fields we intentionally do NOT use (body, selftext, author) are not checked
+    for presence and are never read downstream.
     """
-    warn_if_env_file_permissions_are_loose(str(_ENV_PATH))
-    load_dotenv(dotenv_path=_ENV_PATH)
+    if not isinstance(post, dict):
+        raise ValueError(
+            f"Arctic Shift post from {endpoint} was not a dict. "
+            f"Got type: {type(post).__name__}"
+        )
 
-    required = [
-        "REDDIT_CLIENT_ID",
-        "REDDIT_CLIENT_SECRET",
-        "REDDIT_USER_AGENT",
-    ]
-
-    missing = [name for name in required if not os.getenv(name)]
-
+    required = ["id", "title", "subreddit"]
+    missing = [field for field in required if field not in post]
     if missing:
-        raise RuntimeError(
-            "Missing required environment variables: "
+        raise ValueError(
+            f"Arctic Shift post from {endpoint} missing required fields: "
             + ", ".join(missing)
-            + f". Add them to your .env file at: {_ENV_PATH}"
         )
 
-    if os.getenv("REDDIT_USERNAME") or os.getenv("REDDIT_PASSWORD"):
-        print(
-            "Security note: this read-only tool does not use Reddit username/password. "
-            "Remove REDDIT_USERNAME and REDDIT_PASSWORD from .env if present."
+    if not isinstance(post.get("title", ""), str):
+        raise ValueError(f"Arctic Shift post 'title' field is not a string.")
+
+    if not isinstance(post.get("subreddit", ""), str):
+        raise ValueError(f"Arctic Shift post 'subreddit' field is not a string.")
+
+    return post
+
+
+def validate_subreddit_fields(subreddit: Any, endpoint: str) -> dict:
+    """
+    Validate that a subreddit object from Arctic Shift has expected fields.
+    """
+    if not isinstance(subreddit, dict):
+        raise ValueError(
+            f"Arctic Shift subreddit from {endpoint} was not a dict. "
+            f"Got type: {type(subreddit).__name__}"
         )
 
-    user_agent = os.getenv("REDDIT_USER_AGENT", "")
-    _warn_if_user_agent_format_invalid(user_agent)
+    if "name" not in subreddit and "subreddit" not in subreddit:
+        raise ValueError(
+            f"Arctic Shift subreddit from {endpoint} missing 'name' or 'subreddit' field."
+        )
 
-    reddit = praw.Reddit(
-        client_id=os.getenv("REDDIT_CLIENT_ID"),
-        client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-        user_agent=user_agent,
-    )
+    return subreddit
 
-    reddit.read_only = True
 
-    return reddit
-
+# ---------------------------------------------------------------------------
+# Rate-limit detection and backoff
+# ---------------------------------------------------------------------------
 
 def looks_like_rate_limit_error(exc: Exception) -> bool:
     """
-    Best-effort rate-limit detection across PRAW/prawcore versions.
+    Best-effort rate-limit detection for requests library exceptions.
 
-    PRAW often handles Reddit API rate limits internally, but this guard catches
-    common 429 / ratelimit cases and backs off instead of retrying aggressively.
+    Arctic Shift returns standard HTTP 429 responses when rate limited.
+    The requests library raises HTTPError for 4xx responses when
+    raise_for_status() is called.
     """
     text = str(exc).lower()
 
-    if "ratelimit" in text or "rate limit" in text or "too many requests" in text:
+    if "429" in text or "too many requests" in text or "rate limit" in text:
         return True
 
-    status = getattr(exc, "status_code", None)
-    if status == 429:
-        return True
-
-    response = getattr(exc, "response", None)
-    response_status = getattr(response, "status_code", None)
-    if response_status == 429:
-        return True
+    status_code = getattr(exc, "response", None)
+    if status_code is not None:
+        code = getattr(status_code, "status_code", None)
+        if code == 429:
+            return True
 
     return False
 
@@ -144,7 +139,12 @@ def get_retry_after_seconds(
     exc: Exception,
     default_seconds: int = DEFAULT_RATE_LIMIT_BACKOFF_SECONDS,
 ) -> int:
-    """Use Retry-After if available; otherwise use a conservative default."""
+    """
+    Use Retry-After header from Arctic Shift response if available.
+
+    Arctic Shift includes X-RateLimit-Remaining to signal remaining budget.
+    If we hit a 429, we respect Retry-After or fall back to a conservative default.
+    """
     response = getattr(exc, "response", None)
     headers = getattr(response, "headers", {}) or {}
 
@@ -159,13 +159,35 @@ def get_retry_after_seconds(
     return default_seconds
 
 
+def check_rate_limit_header(headers: dict) -> None:
+    """
+    Log a warning when the Arctic Shift rate limit budget is running low.
+
+    This is a proactive check done after each successful response. If remaining
+    budget is very low, we print a warning so the user knows why the tool may
+    slow down.
+    """
+    remaining = headers.get("X-RateLimit-Remaining") or headers.get("x-ratelimit-remaining")
+
+    if remaining is not None:
+        try:
+            remaining_int = int(float(remaining))
+            if remaining_int < 5:
+                print(
+                    f"Note: Arctic Shift rate limit budget is low "
+                    f"({remaining_int} requests remaining). "
+                    "The tool will back off automatically if needed."
+                )
+        except ValueError:
+            pass
+
+
 def run_with_rate_limit_backoff(callable_obj, *, description: str):
     """
-    Execute a PRAW call with limited, conservative retries for rate-limit errors.
+    Execute an HTTP call with conservative retries for rate-limit errors.
 
-    The goal is to respect rate limits and fail safely rather than aggressively
-    retrying. This helper is intentionally generic so Reddit search code stays
-    focused on retrieval logic.
+    Same pattern as the main branch's PRAW backoff, adapted for the requests
+    library. Fails safely rather than retrying aggressively.
     """
     attempt = 0
 
