@@ -157,7 +157,7 @@ def semantic_rank(
             num_comments=getattr(submission, "num_comments", 0),
         )
         recency_score = compute_recency_score(
-            created_utc=getattr(submission, "created_utc", 0),
+            created_utc=float(submission.get("created_utc") or 0),
             from_date=config.from_date,
         )
         composite_score = compute_composite_score(
@@ -168,19 +168,23 @@ def semantic_rank(
         )
 
         created_at = datetime.fromtimestamp(
-            submission.created_utc,
+            float(submission.get("created_utc") or 0),
             tz=timezone.utc,
         ).strftime("%Y-%m-%d")
 
         results.append(
             RedditThreadResult(
-                title=clean_text(getattr(submission, "title", "")),
-                subreddit=str(getattr(submission, "subreddit", "")),
-                url=f"https://www.reddit.com{submission.permalink}",
-                reddit_id=reddit_id,
+                title=clean_text(submission.get("title", "")),
+                subreddit=str(submission.get("subreddit", "")),
+                url=(
+                    f"https://www.reddit.com{submission.get('permalink', '')}"
+                    if submission.get("permalink")
+                    else f"https://www.reddit.com/r/{submission.get('subreddit', '')}/comments/{submission.get('id', '')}/"
+                ),
+                reddit_id=str(submission.get("id", reddit_id)),
                 created_at=created_at,
-                reddit_score=int(getattr(submission, "score", 0)),
-                num_comments=int(getattr(submission, "num_comments", 0)),
+                reddit_score=int(submission.get("score") or 0),
+                num_comments=int(submission.get("num_comments") or 0),
                 semantic_score=round(semantic_score, 4),
                 pain_score=round(pain_score, 4),
                 engagement_score=round(engagement_score, 4),

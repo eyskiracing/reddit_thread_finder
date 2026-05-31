@@ -1,11 +1,19 @@
-"""Command-line interface and orchestration."""
+"""Command-line interface and orchestration for the arctic-shift-backend branch.
+
+Key differences from the main branch:
+  - No Reddit client setup or credential handling
+  - Subreddit discovery step added between focus builder and search
+  - Data recency warning shown when from_date is very recent
+  - print_purpose_limitations updated to reflect Arctic Shift backend
+"""
 
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 
 from .constants import (
-    ALLOWED_SORTS,
+    ARCTIC_SHIFT_DATA_LAG_DAYS,
     DEFAULT_DELAY_SECONDS,
     MAX_CANDIDATE_LIMIT_PER_SEARCH,
     MAX_SEARCH_OPERATIONS,
@@ -14,6 +22,7 @@ from .constants import (
     MODEL_NAME,
     MODEL_REVISION,
 )
+from .discovery import confirm_subreddits_with_user, discover_subreddits
 from .focus import (
     create_search_brief,
     print_search_brief,
@@ -25,7 +34,6 @@ from .output import print_results, write_json
 from .query import generate_search_queries
 from .reddit_search import fetch_candidates
 from .scoring import semantic_rank
-from .security import get_reddit_client
 from .validation import (
     enforce_limits,
     parse_positive_int,
@@ -38,8 +46,8 @@ def prompt_for_config(args: argparse.Namespace) -> SearchConfig:
     """
     Build a SearchConfig from CLI arguments or interactive prompts.
 
-    Interactive users are guided through the generic Pain Point Search Focus
-    Builder. Scripted users can pass --topic and optional focus-builder fields.
+    The subreddit list is populated by the discovery step unless the user
+    has explicitly provided --subreddits on the command line.
     """
     raw_topic = args.topic or input(
         "Describe the pain point you want to find Reddit threads about: "
@@ -75,8 +83,6 @@ def prompt_for_config(args: argparse.Namespace) -> SearchConfig:
             avoid_terms=avoid_terms,
         )
 
-        # Show the brief when CLI users provide focus fields, but keep scripted
-        # behavior quiet when they pass only --topic.
         if any([args.persona, args.task, args.friction, args.outcome, args.must_include, args.avoid]):
             print_search_brief(brief)
 
@@ -98,25 +104,26 @@ def prompt_for_config(args: argparse.Namespace) -> SearchConfig:
         else input(f"How many thread links should be returned? Max {MAX_TOP_K}: ").strip()
     )
 
-    subreddits_value = args.subreddits
-    if not subreddits_value:
-        subreddits_value = input(
-            f"Search which subreddit(s)? Comma-separated, max {MAX_SUBREDDITS}; "
-            "or press enter for all: "
-        ).strip() or "all"
-
     from_date = parse_yyyy_mm_dd(from_date_value)
     min_score = parse_score(str(min_score_value))
     top_k = parse_positive_int(str(top_k_value), "top_k")
 
-    subreddits = [
-        s.strip().removeprefix("r/")
-        for s in subreddits_value.split(",")
-        if s.strip()
-    ]
+    # Subreddit handling:
+    # - If --subreddits is provided, use that (skip discovery)
+    # - Otherwise, run the automatic discovery step
+    if args.subreddits:
+        subreddits = [
+            s.strip().removeprefix("r/")
+            for s in args.subreddits.split(",")
+            if s.strip()
+        ] or ["all"]
+    else:
+        discovered = discover_subreddits(topic)
+        subreddits = confirm_subreddits_with_user(discovered, MAX_SUBREDDITS)
 
-    if not subreddits:
-        subreddits = ["all"]
+        if not subreddits:
+            print("\nNo subreddits selected. Exiting.")
+            raise SystemExit(0)
 
     if args.rank_by not in {"semantic", "composite"}:
         raise ValueError("--rank-by must be either 'semantic' or 'composite'.")
@@ -141,58 +148,37 @@ def prompt_for_config(args: argparse.Namespace) -> SearchConfig:
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
-    """Define the command-line interface for interactive or scripted local use."""
+    """Define the CLI for interactive or scripted local use."""
     parser = argparse.ArgumentParser(
         description=(
             "Find Reddit thread links semantically related to a pain point. "
-            "Returns links and metadata only; does not fetch comments or thread bodies."
+            "Uses Arctic Shift — no Reddit API credentials required. "
+            "Returns links and metadata only."
         )
     )
 
     parser.add_argument("--topic", help="Natural-language pain point to search for.")
-    parser.add_argument(
-        "--focused-query",
-        help="Optional focused query to use after scope narrowing.",
-    )
-    parser.add_argument(
-        "--persona",
-        help="Who has the problem? Role, team, customer type, or persona.",
-    )
-    parser.add_argument(
-        "--task",
-        help="What the persona is trying to do; the job, workflow, or situation.",
-    )
-    parser.add_argument(
-        "--friction",
-        help="What makes the situation painful today.",
-    )
-    parser.add_argument(
-        "--outcome",
-        help="What better outcome the persona wants.",
-    )
-    parser.add_argument(
-        "--must-include",
-        help="Comma-separated terms that should anchor the search.",
-    )
-    parser.add_argument(
-        "--avoid",
-        help="Comma-separated terms/topics to filter out from title/metadata.",
-    )
+    parser.add_argument("--focused-query", help="Optional focused query override.")
+    parser.add_argument("--persona", help="Who has the problem.")
+    parser.add_argument("--task", help="What they are trying to do.")
+    parser.add_argument("--friction", help="What makes it painful today.")
+    parser.add_argument("--outcome", help="What better outcome they want.")
+    parser.add_argument("--must-include", help="Comma-separated terms to anchor the search.")
+    parser.add_argument("--avoid", help="Comma-separated terms to filter out.")
     parser.add_argument(
         "--skip-focus-builder",
         action="store_true",
         help="Skip the interactive focus builder and use --topic directly.",
     )
     parser.add_argument("--from-date", help="Start date in YYYY-MM-DD format.")
-    parser.add_argument(
-        "--min-score",
-        type=float,
-        help="Minimum semantic score from 0.0 to 1.0.",
-    )
+    parser.add_argument("--min-score", type=float, help="Minimum semantic score 0.0–1.0.")
     parser.add_argument("--top-k", type=int, help=f"Number of links to return. Max {MAX_TOP_K}.")
     parser.add_argument(
         "--subreddits",
-        help=f"Comma-separated subreddit list. Max {MAX_SUBREDDITS}. Use 'all' for r/all.",
+        help=(
+            f"Comma-separated subreddit list. Max {MAX_SUBREDDITS}. "
+            "If omitted, subreddits are discovered automatically."
+        ),
     )
     parser.add_argument(
         "--candidate-limit",
@@ -208,19 +194,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--json-output",
-        help="Optional path to write link results as JSON (must be within current directory).",
+        help="Optional path to write results as JSON (must be within current directory).",
     )
     parser.add_argument(
         "--delay-seconds",
         type=float,
         default=DEFAULT_DELAY_SECONDS,
-        help="Small pause between Reddit search operations.",
+        help="Pause between Arctic Shift search operations.",
     )
     parser.add_argument(
         "--max-search-operations",
         type=int,
         default=MAX_SEARCH_OPERATIONS,
-        help=f"Maximum Reddit search operations. Hard cap {MAX_SEARCH_OPERATIONS}.",
+        help=f"Maximum search operations. Hard cap {MAX_SEARCH_OPERATIONS}.",
     )
 
     return parser
@@ -228,25 +214,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def print_purpose_limitations(json_output: str | None = None) -> None:
     """Show runtime guardrails before retrieval begins."""
+    now = datetime.now(timezone.utc)
     print("\nPurpose limitation:")
     print(" - Returns Reddit links and lightweight metadata only.")
-    print(" - Does not retrieve comments.")
-    print(" - Does not use thread bodies for semantic matching.")
+    print(" - Does not retrieve comments or thread bodies.")
     print(" - Does not generate or post replies.")
-    print(" - Reddit API client is forced into read-only mode.")
+    print(" - Data source: Arctic Shift (no Reddit API credentials required).")
+    print(f" - Arctic Shift data may be up to {ARCTIC_SHIFT_DATA_LAG_DAYS} days behind real-time.")
     print(f" - Returns at most {MAX_TOP_K} thread links.")
-    print(f" - Conservative Reddit sort modes: {', '.join(ALLOWED_SORTS)}.")
     if json_output:
         print(f" - Results will be written to: {json_output}")
 
 
 def main() -> None:
-    """
-    CLI entrypoint.
-
-    Prints the purpose limitations at runtime so users see the guardrails before
-    retrieval begins.
-    """
+    """CLI entrypoint."""
     parser = build_arg_parser()
     args = parser.parse_args()
 
@@ -255,14 +236,13 @@ def main() -> None:
     print_purpose_limitations(json_output=config.json_output)
 
     print(f"\nFocused search query: {config.topic}")
+    print(f"Subreddits: {', '.join('r/' + s for s in config.subreddits)}")
     print("\nQuery variants:")
     for query in generate_search_queries(config.topic, seed_queries=config.additional_queries):
         print(f" - {query}")
 
-    reddit = get_reddit_client()
-
-    print("\nFetching Reddit candidates...")
-    candidates = fetch_candidates(reddit, config)
+    print("\nFetching Reddit candidates from Arctic Shift...")
+    candidates = fetch_candidates(config)
     print(f"Fetched {len(candidates)} unique candidate links after date filtering.")
 
     print(f"\nUsing semantic model: {MODEL_NAME} @ {MODEL_REVISION}")
