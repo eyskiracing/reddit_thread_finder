@@ -1,4 +1,19 @@
-"""Bounded Reddit candidate retrieval."""
+"""Bounded Reddit candidate retrieval via Arctic Shift API.
+
+This module replaces the PRAW-based Reddit API client from the main branch.
+It uses direct HTTP requests to the Arctic Shift public API.
+
+No credentials are required. Arctic Shift is a free public API with no
+authentication. All requests are read-only GET requests.
+
+Security notes:
+  - All query strings and subreddit names are passed as structured URL
+    parameters, not concatenated into URLs, preventing injection
+  - All responses are validated via security.validate_arctic_shift_response
+    and security.validate_post_fields before use
+  - Thread body (selftext) and comments are intentionally not requested
+    or used anywhere in this module
+"""
 
 from __future__ import annotations
 
@@ -6,185 +21,205 @@ import time
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 
-import praw
+import requests
 
-from .constants import ALLOWED_SORTS, MAX_UNIQUE_CANDIDATES
+from .constants import (
+    ARCTIC_SHIFT_BASE_URL,
+    ARCTIC_SHIFT_DATA_LAG_DAYS,
+    ARCTIC_SHIFT_TIMEOUT_SECONDS,
+    ARCTIC_SHIFT_USER_AGENT,
+    DEFAULT_DELAY_SECONDS,
+    MAX_SEARCH_OPERATIONS,
+    MAX_UNIQUE_CANDIDATES,
+)
 from .models import SearchConfig
 from .query import generate_search_queries
-from .security import run_with_rate_limit_backoff
+from .security import (
+    check_rate_limit_header,
+    run_with_rate_limit_backoff,
+    validate_arctic_shift_response,
+    validate_post_fields,
+)
 from .text_utils import clean_text
 
 
-def choose_reddit_time_filter(from_date: datetime, now: Optional[datetime] = None) -> str:
+def _make_session() -> requests.Session:
+    """Create a requests session with the standard headers for Arctic Shift."""
+    session = requests.Session()
+    session.headers.update({"User-Agent": ARCTIC_SHIFT_USER_AGENT})
+    return session
+
+
+def warn_if_from_date_is_recent(from_date: datetime) -> None:
     """
-    Choose the smallest Reddit search time_filter that contains from_date -> now.
+    Warn the user when from_date is within the Arctic Shift data lag window.
 
-    Reddit's native time filters are coarse. The script intentionally over-fetches
-    within Reddit's available window, then applies the exact from_date filter
-    locally using created_utc.
+    Arctic Shift data may be 2–4 weeks behind real-time. If the user's
+    from_date is very recent, they may get fewer results than expected.
     """
-    now = now or datetime.now(timezone.utc)
-    delta_days = max(0, (now - from_date).days)
+    now = datetime.now(timezone.utc)
+    age_days = (now - from_date).days
 
-    if delta_days <= 1:
-        return "day"
-    if delta_days <= 7:
-        return "week"
-    if delta_days <= 31:
-        return "month"
-    if delta_days <= 365:
-        return "year"
-    return "all"
+    if age_days <= ARCTIC_SHIFT_DATA_LAG_DAYS:
+        print(
+            f"\nNote: Arctic Shift data may be up to {ARCTIC_SHIFT_DATA_LAG_DAYS} days "
+            f"behind real-time. Your from_date is {age_days} days ago, so results "
+            "may be incomplete for very recent posts."
+        )
 
 
-def build_semantic_text_from_metadata_only(submission) -> str:
+def build_semantic_text_from_metadata_only(post: dict) -> str:
     """
-    Build candidate text without using submission.selftext or comments.
+    Build candidate text from post metadata only — never from body or comments.
 
-    This keeps the tool focused on finding links for human review, not collecting
-    or processing Reddit thread content.
+    This keeps the tool focused on link discovery and prevents processing of
+    Reddit thread content beyond titles and lightweight metadata.
     """
     parts = [
-        f"Title: {getattr(submission, 'title', '') or ''}",
-        f"Subreddit: {getattr(submission, 'subreddit', '') or ''}",
+        f"Title: {post.get('title', '') or ''}",
+        f"Subreddit: {post.get('subreddit', '') or ''}",
     ]
 
-    link_flair = getattr(submission, "link_flair_text", None)
-    if link_flair:
-        parts.append(f"Flair: {link_flair}")
+    flair = post.get("link_flair_text") or post.get("flair")
+    if flair:
+        parts.append(f"Flair: {flair}")
 
     return clean_text(" ".join(parts))
 
 
-def _execute_search(subreddit, query: str, sort: str, time_filter: str, limit: int) -> list:
+def _fetch_posts_from_arctic_shift(
+    session: requests.Session,
+    subreddit: str,
+    query: str,
+    from_timestamp: float,
+    limit: int,
+) -> List[dict]:
     """
-    Execute a single Reddit search with explicit parameter binding.
+    Fetch posts from Arctic Shift for a single subreddit and query.
 
-    This helper exists to avoid Python's closure-by-reference behaviour.
-    When run_with_rate_limit_backoff retries a lambda, the lambda re-reads
-    the loop variables at retry time, not at the time the lambda was created.
-    Passing all arguments explicitly here guarantees the retry searches for
-    the same query/sort combination that originally triggered the rate limit.
+    Parameters are passed as structured URL params, never concatenated.
+    The response is validated before being returned.
     """
-    return list(
-        subreddit.search(
-            query,
-            sort=sort,
-            time_filter=time_filter,
-            limit=limit,
-            # Plain syntax is intentionally locked. Lucene syntax supports
-            # field-specific queries (e.g. author:, flair:) that could be
-            # used to target user data. Plain keeps searches to keyword
-            # matching and is consistent with Reddit's own search UI.
-            syntax="plain",
+    endpoint = f"{ARCTIC_SHIFT_BASE_URL}/posts/search"
+
+    # Convert from_timestamp to an ISO date string for Arctic Shift's after parameter
+    from_date_str = datetime.fromtimestamp(from_timestamp, tz=timezone.utc).strftime("%Y-%m-%d")
+
+    def _do_request():
+        response = session.get(
+            endpoint,
+            params={
+                "q": query,
+                "subreddit": subreddit,
+                "after": from_date_str,
+                "limit": limit,
+                "sort": "relevance",
+            },
+            timeout=ARCTIC_SHIFT_TIMEOUT_SECONDS,
         )
+        response.raise_for_status()
+        check_rate_limit_header(dict(response.headers))
+        return response.json()
+
+    raw = run_with_rate_limit_backoff(
+        _do_request,
+        description=f"r/{subreddit} search query={query!r}",
     )
+
+    validated = validate_arctic_shift_response(raw, endpoint)
+    return validated.get("data", [])
 
 
 def fetch_candidates(
-    reddit: praw.Reddit,
     config: SearchConfig,
-) -> Dict[str, Tuple[object, str, List[str]]]:
+) -> Dict[str, Tuple[dict, str, List[str]]]:
     """
-    Retrieve bounded Reddit candidates keyed by Reddit submission ID.
+    Retrieve bounded Reddit candidates from Arctic Shift keyed by post ID.
 
     Returns:
-        submission_id -> (submission, semantic_text, matched_queries)
+        post_id -> (post_dict, semantic_text, matched_queries)
 
     This function intentionally does not retrieve thread bodies or comments.
+    It uses only title, subreddit, and flair for semantic matching.
     """
-    now = datetime.now(timezone.utc)
+    session = _make_session()
     from_timestamp = config.from_date.timestamp()
-    time_filter = choose_reddit_time_filter(config.from_date, now=now)
+
+    warn_if_from_date_is_recent(config.from_date)
+
     queries = generate_search_queries(config.topic, seed_queries=config.additional_queries)
 
-    if "all" in config.subreddits:
-        print("Note: searching r/all — results will span all public subreddits.")
-
-    candidates: Dict[str, Tuple[object, str, List[str]]] = {}
+    candidates: Dict[str, Tuple[dict, str, List[str]]] = {}
     operations = 0
 
     for subreddit_name in config.subreddits:
-        subreddit = reddit.subreddit(subreddit_name)
-
         for query in queries:
-            for sort in ALLOWED_SORTS:
-                # Stop before the search pattern can drift into high-volume monitoring.
-                if operations >= config.max_search_operations:
-                    print(
-                        f"Reached search operation cap "
-                        f"({config.max_search_operations}). Stopping retrieval."
-                    )
-                    return candidates
+            if operations >= config.max_search_operations:
+                print(
+                    f"Reached search operation cap "
+                    f"({config.max_search_operations}). Stopping retrieval."
+                )
+                return candidates
 
-                # Candidate cap limits local processing and JSON export blast radius.
-                if len(candidates) >= MAX_UNIQUE_CANDIDATES:
-                    print(
-                        f"Reached unique candidate cap "
-                        f"({MAX_UNIQUE_CANDIDATES}). Stopping retrieval."
-                    )
-                    return candidates
+            if len(candidates) >= MAX_UNIQUE_CANDIDATES:
+                print(
+                    f"Reached unique candidate cap "
+                    f"({MAX_UNIQUE_CANDIDATES}). Stopping retrieval."
+                )
+                return candidates
 
-                operations += 1
+            operations += 1
 
-                try:
-                    # Bind loop variables explicitly via _execute_search to prevent
-                    # the closure-by-reference bug: on retry, a bare lambda would
-                    # re-read `query` and `sort` from the enclosing scope, which
-                    # may have advanced to the next iteration.
-                    submissions = run_with_rate_limit_backoff(
-                        lambda q=query, s=sort, tf=time_filter, lim=config.candidate_limit: (
-                            _execute_search(subreddit, q, s, tf, lim)
-                        ),
-                        description=(
-                            f"r/{subreddit_name} search query={query!r} "
-                            f"sort={sort!r}"
-                        ),
-                    )
+            try:
+                posts = _fetch_posts_from_arctic_shift(
+                    session=session,
+                    subreddit=subreddit_name,
+                    query=query,
+                    from_timestamp=from_timestamp,
+                    limit=config.candidate_limit,
+                )
 
-                    for submission in submissions:
-                        created_utc = getattr(submission, "created_utc", 0)
-                        if created_utc < from_timestamp:
+                for raw_post in posts:
+                    try:
+                        post = validate_post_fields(raw_post, "posts/search")
+                    except ValueError as exc:
+                        print(f"Warning: skipping malformed post: {exc}")
+                        continue
+
+                    # created_utc may come back as int, float, or string
+                    created_utc = float(post.get("created_utc") or 0)
+                    if created_utc < from_timestamp:
+                        continue
+
+                    # Intentionally only uses title, subreddit, flair.
+                    # Thread body and comments are never requested or used.
+                    text = build_semantic_text_from_metadata_only(post)
+
+                    if not text:
+                        continue
+
+                    if config.avoid_terms:
+                        lower_text = text.lower()
+                        if any(term.lower() in lower_text for term in config.avoid_terms):
                             continue
 
-                        if getattr(submission, "stickied", False):
-                            continue
+                    post_id = str(post["id"]).removeprefix("t3_")
 
-                        # Important: this intentionally avoids submission.selftext
-                        # and comments. The goal is to find links, not ingest content.
-                        text = build_semantic_text_from_metadata_only(submission)
+                    if post_id not in candidates:
+                        candidates[post_id] = (post, text, [query])
+                    else:
+                        existing_post, existing_text, matched_queries = candidates[post_id]
+                        if query not in matched_queries:
+                            matched_queries.append(query)
+                        candidates[post_id] = (existing_post, existing_text, matched_queries)
 
-                        if not text:
-                            continue
+            except Exception as exc:
+                print(
+                    f"Warning: search failed for r/{subreddit_name}, "
+                    f"query={query!r}: {exc}"
+                )
 
-                        # Avoid terms are user-supplied noise filters. They are applied
-                        # only to lightweight metadata, never to body/comment content.
-                        if config.avoid_terms:
-                            lower_text = text.lower()
-                            if any(term.lower() in lower_text for term in config.avoid_terms):
-                                continue
-
-                        if submission.id not in candidates:
-                            candidates[submission.id] = (submission, text, [query])
-                        else:
-                            existing_submission, existing_text, matched_queries = candidates[
-                                submission.id
-                            ]
-                            if query not in matched_queries:
-                                matched_queries.append(query)
-                            candidates[submission.id] = (
-                                existing_submission,
-                                existing_text,
-                                matched_queries,
-                            )
-
-                except Exception as exc:
-                    print(
-                        f"Warning: search failed for r/{subreddit_name}, "
-                        f"query={query!r}, sort={sort!r}: {exc}"
-                    )
-
-                if config.delay_seconds:
-                    time.sleep(config.delay_seconds)
+            if config.delay_seconds:
+                time.sleep(config.delay_seconds)
 
     return candidates
