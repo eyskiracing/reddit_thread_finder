@@ -117,6 +117,21 @@ class DependencyHardeningTests(unittest.TestCase):
         self.assertIn("sentence-transformers>=3.1.1", requirements)
         self.assertIn("<4.0.0", requirements)
 
+    def test_praw_and_dotenv_are_not_in_requirements(self):
+        """praw and python-dotenv must not be declared as dependencies in this branch."""
+        import re
+        requirements = Path("requirements.txt").read_text(encoding="utf-8")
+        # Check that no uncommented lines declare praw or python-dotenv
+        active_lines = [l for l in requirements.splitlines() if l.strip() and not l.strip().startswith("#")]
+        active_text = "\n".join(active_lines)
+        self.assertNotIn("praw", active_text)
+        self.assertNotIn("python-dotenv", active_text)
+
+    def test_requests_is_in_requirements(self):
+        """requests must be declared in requirements.txt for Arctic Shift."""
+        requirements = Path("requirements.txt").read_text(encoding="utf-8")
+        self.assertIn("requests>=", requirements)
+
     def test_semantic_model_revision_is_pinned(self):
         """Ensure the embedding model name and revision remain pinned."""
         self.assertEqual(
@@ -147,6 +162,7 @@ class ModularStructureTests(unittest.TestCase):
             "cli.py",
             "focus.py",
             "text_utils.py",
+            "discovery.py",
         ]
 
         package_dir = Path("reddit_thread_finder_core")
@@ -269,38 +285,95 @@ class FocusBuilderTests(unittest.TestCase):
 
 
 class SecurityModuleTests(unittest.TestCase):
-    """Verify security module behavior without requiring live credentials."""
+    """Verify Arctic Shift HTTP response validation."""
 
-    def test_user_agent_pattern_rejects_bad_format(self):
-        """The User-Agent pattern rejects non-compliant strings."""
-        from reddit_thread_finder_core.security import _USER_AGENT_PATTERN
-        bad_agents = [
-            "reddit-thread-finder/0.1 by u/username",   # missing platform:app:version
-            "myapp v1.0",
-            "",
-            "script:myapp:v1.0",                         # missing (by /u/...)
+    def test_validate_response_rejects_non_dict(self):
+        """validate_arctic_shift_response rejects non-dict responses."""
+        from reddit_thread_finder_core.security import validate_arctic_shift_response
+        with self.assertRaises(ValueError) as ctx:
+            validate_arctic_shift_response(["not", "a", "dict"], "/test")
+        self.assertIn("not a JSON object", str(ctx.exception))
+
+    def test_validate_response_rejects_missing_data_key(self):
+        """validate_arctic_shift_response rejects responses without data key."""
+        from reddit_thread_finder_core.security import validate_arctic_shift_response
+        with self.assertRaises(ValueError) as ctx:
+            validate_arctic_shift_response({"error": "something went wrong"}, "/test")
+        self.assertIn("missing 'data' field", str(ctx.exception))
+
+    def test_validate_response_rejects_non_list_data(self):
+        """validate_arctic_shift_response rejects non-list data field."""
+        from reddit_thread_finder_core.security import validate_arctic_shift_response
+        with self.assertRaises(ValueError):
+            validate_arctic_shift_response({"data": {"not": "a list"}}, "/test")
+
+    def test_validate_response_accepts_valid_response(self):
+        """validate_arctic_shift_response accepts a well-formed response."""
+        from reddit_thread_finder_core.security import validate_arctic_shift_response
+        result = validate_arctic_shift_response({"data": []}, "/test")
+        self.assertEqual(result["data"], [])
+
+    def test_validate_post_fields_rejects_missing_required(self):
+        """validate_post_fields rejects posts missing required fields."""
+        from reddit_thread_finder_core.security import validate_post_fields
+        with self.assertRaises(ValueError) as ctx:
+            validate_post_fields({"title": "hello"}, "/posts/search")
+        self.assertIn("missing required fields", str(ctx.exception))
+
+    def test_validate_post_fields_accepts_valid_post(self):
+        """validate_post_fields accepts a post with all required fields."""
+        from reddit_thread_finder_core.security import validate_post_fields
+        post = {"id": "abc123", "title": "Test post", "subreddit": "test"}
+        result = validate_post_fields(post, "/posts/search")
+        self.assertEqual(result["id"], "abc123")
+
+    def test_no_credentials_in_security_module(self):
+        """Verify the security module has no credential-handling code."""
+        import inspect
+        from reddit_thread_finder_core import security
+        source = inspect.getsource(security)
+        # These strings should not appear as functional code (imports/assignments/calls)
+        self.assertNotIn("REDDIT_CLIENT_ID", source)
+        self.assertNotIn("REDDIT_CLIENT_SECRET", source)
+        self.assertNotIn("load_dotenv", source)
+        self.assertNotIn("import praw", source)
+        self.assertNotIn("praw.Reddit(", source)
+
+
+class DiscoveryModuleTests(unittest.TestCase):
+    """Verify subreddit discovery validation logic."""
+
+    def test_valid_subreddit_names_accepted(self):
+        """Valid subreddit names pass the validation pattern."""
+        from reddit_thread_finder_core.discovery import _is_valid_subreddit_name
+        valid = ["startups", "sysadmin", "ITManagers", "CustomerService_2", "r_place"]
+        for name in valid:
+            with self.subTest(name=name):
+                self.assertTrue(_is_valid_subreddit_name(name))
+
+    def test_invalid_subreddit_names_rejected(self):
+        """Invalid subreddit names are rejected to prevent injection."""
+        from reddit_thread_finder_core.discovery import _is_valid_subreddit_name
+        invalid = [
+            "r/startups",          # has slash
+            "has spaces",          # has space
+            "has-hyphen",          # has hyphen (not allowed in Reddit names)
+            "../etc/passwd",       # path traversal attempt
+            "a" * 51,              # too long
+            "",                    # empty
         ]
-        for agent in bad_agents:
-            with self.subTest(agent=agent):
-                self.assertIsNone(_USER_AGENT_PATTERN.match(agent))
+        for name in invalid:
+            with self.subTest(name=name):
+                self.assertFalse(_is_valid_subreddit_name(name))
 
-    def test_user_agent_pattern_accepts_good_format(self):
-        """The User-Agent pattern accepts correctly formatted strings."""
-        from reddit_thread_finder_core.security import _USER_AGENT_PATTERN
-        good_agents = [
-            "script:com.yourname.reddit-thread-finder:v0.1.0 (by /u/yourusername)",
-            "bot:myapp:v2.3.1 (by /u/some_user)",
-        ]
-        for agent in good_agents:
-            with self.subTest(agent=agent):
-                self.assertIsNotNone(_USER_AGENT_PATTERN.match(agent))
-
-    def test_env_path_is_relative_to_package_root_not_cwd(self):
-        """_ENV_PATH resolves relative to the package, not the caller's CWD."""
-        from reddit_thread_finder_core.security import _ENV_PATH
-        # The path should be an absolute path ending in .env
-        self.assertTrue(_ENV_PATH.is_absolute())
-        self.assertEqual(_ENV_PATH.name, ".env")
+    def test_parse_manual_subreddit_input_validates_names(self):
+        """Manual subreddit input is validated and cleaned."""
+        from reddit_thread_finder_core.discovery import _parse_manual_subreddit_input
+        result = _parse_manual_subreddit_input("startups, r/sysadmin, bad/name, valid_one", 10)
+        self.assertIn("startups", result)
+        self.assertIn("sysadmin", result)
+        self.assertIn("valid_one", result)
+        self.assertNotIn("bad/name", result)
 
 
 if __name__ == "__main__":
