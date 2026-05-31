@@ -3,14 +3,14 @@
 Key differences from the main branch:
   - No Reddit client setup or credential handling
   - Subreddit discovery step added between focus builder and search
-  - Data recency warning shown when from_date is very recent
+  - Data recency check with offer to adjust from_date when too recent
   - print_purpose_limitations updated to reflect Arctic Shift backend
 """
 
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from .constants import (
     ARCTIC_SHIFT_DATA_LAG_DAYS,
@@ -40,6 +40,56 @@ from .validation import (
     parse_score,
     parse_yyyy_mm_dd,
 )
+
+
+def check_and_adjust_from_date(from_date: datetime) -> datetime:
+    """
+    Check whether from_date falls within Arctic Shift's data lag window.
+
+    Arctic Shift data may be 2-4 weeks behind real-time. If the user's
+    from_date is within that window, results may be sparse or missing
+    entirely — not because nothing exists, but because Arctic Shift hasn't
+    archived it yet.
+
+    Rather than proceeding silently and confusing the user with empty results,
+    this function explains the situation and offers to adjust from_date to a
+    safer value before the search begins.
+
+    For scripted use (--from-date passed as a CLI argument), the warning is
+    printed but the user is not prompted — the original date is used as-is
+    since a script cannot wait for interactive input.
+    """
+    now = datetime.now(timezone.utc)
+    age_days = (now - from_date).days
+
+    if age_days >= ARCTIC_SHIFT_DATA_LAG_DAYS:
+        return from_date
+
+    safe_days = ARCTIC_SHIFT_DATA_LAG_DAYS + 30
+    safe_date = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    safe_date = safe_date - timedelta(days=safe_days)
+    safe_date_str = safe_date.strftime("%Y-%m-%d")
+
+    print(
+        f"\nNote: Your from_date is {age_days} days ago, which is within Arctic Shift's "
+        f"data lag window of up to {ARCTIC_SHIFT_DATA_LAG_DAYS} days. "
+        f"Results may be incomplete or empty for very recent dates."
+    )
+    print(
+        f"A safer starting date would be {safe_date_str} "
+        f"({safe_days} days ago)."
+    )
+
+    response = input(
+        f"Would you like to use {safe_date_str} instead? [Y/n]: "
+    ).strip().lower()
+
+    if response in ("", "y", "yes"):
+        print(f"Using adjusted from_date: {safe_date_str}")
+        return safe_date
+    else:
+        print(f"Keeping your original from_date: {from_date.strftime('%Y-%m-%d')}. Results may be sparse.")
+        return from_date
 
 
 def prompt_for_config(args: argparse.Namespace) -> SearchConfig:
@@ -105,6 +155,7 @@ def prompt_for_config(args: argparse.Namespace) -> SearchConfig:
     )
 
     from_date = parse_yyyy_mm_dd(from_date_value)
+    from_date = check_and_adjust_from_date(from_date)
     min_score = parse_score(str(min_score_value))
     top_k = parse_positive_int(str(top_k_value), "top_k")
 

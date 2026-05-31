@@ -292,7 +292,7 @@ To generate a fully resolved local SBOM:
 
 ## Known limitations
 
-1. **Data recency** — Arctic Shift data may be 2–4 weeks behind real-time. Searches with a very recent `--from-date` may return fewer results than expected. The tool warns you when this is likely.
+1. **Data recency** — Arctic Shift data may be 2–4 weeks behind real-time. If your `--from-date` is within that window, the tool will warn you and offer to adjust to a safer date automatically before the search begins.
 2. **Subreddit-scoped search** — Arctic Shift does not support Reddit-wide full text search. The discovery step mitigates this but cannot guarantee every relevant community is found.
 3. **Community-run server** — Arctic Shift is maintained by one developer. If the server is unavailable, the tool will fail with a clear error message rather than silently.
 4. **Semantic matching uses title and metadata only** — thread bodies and comments are intentionally not retrieved.

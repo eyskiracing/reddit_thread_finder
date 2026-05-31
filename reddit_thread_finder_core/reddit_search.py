@@ -19,13 +19,12 @@ from __future__ import annotations
 
 import time
 from datetime import datetime, timezone
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import requests
 
 from .constants import (
     ARCTIC_SHIFT_BASE_URL,
-    ARCTIC_SHIFT_DATA_LAG_DAYS,
     ARCTIC_SHIFT_TIMEOUT_SECONDS,
     ARCTIC_SHIFT_USER_AGENT,
     DEFAULT_DELAY_SECONDS,
@@ -48,24 +47,6 @@ def _make_session() -> requests.Session:
     session = requests.Session()
     session.headers.update({"User-Agent": ARCTIC_SHIFT_USER_AGENT})
     return session
-
-
-def warn_if_from_date_is_recent(from_date: datetime) -> None:
-    """
-    Warn the user when from_date is within the Arctic Shift data lag window.
-
-    Arctic Shift data may be 2–4 weeks behind real-time. If the user's
-    from_date is very recent, they may get fewer results than expected.
-    """
-    now = datetime.now(timezone.utc)
-    age_days = (now - from_date).days
-
-    if age_days <= ARCTIC_SHIFT_DATA_LAG_DAYS:
-        print(
-            f"\nNote: Arctic Shift data may be up to {ARCTIC_SHIFT_DATA_LAG_DAYS} days "
-            f"behind real-time. Your from_date is {age_days} days ago, so results "
-            "may be incomplete for very recent posts."
-        )
 
 
 def build_semantic_text_from_metadata_only(post: dict) -> str:
@@ -144,8 +125,6 @@ def fetch_candidates(
     """
     session = _make_session()
     from_timestamp = config.from_date.timestamp()
-
-    warn_if_from_date_is_recent(config.from_date)
 
     queries = generate_search_queries(config.topic, seed_queries=config.additional_queries)
 

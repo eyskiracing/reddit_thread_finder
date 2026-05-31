@@ -196,7 +196,13 @@ For a stricter search: `0.80`
 
 ## Note on data recency
 
-This version uses archived Reddit data that may be 2–4 weeks behind real-time. If you search from a very recent date, you may get fewer results than expected. Try searching from an earlier date if results seem sparse.
+This version uses archived Reddit data that may be 2–4 weeks behind real-time. If you enter a very recent date, the tool will automatically warn you and ask:
+
+```
+Would you like to use 2026-04-01 instead? [Y/n]:
+```
+
+Press **Enter** or type **Y** to let the tool adjust to a safer date. Type **N** if you want to keep your original date anyway (results may be sparse).
 
 ---
 
