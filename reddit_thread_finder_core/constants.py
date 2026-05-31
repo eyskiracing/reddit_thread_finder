@@ -3,21 +3,53 @@
 These values are intentionally conservative. The tool is meant to find a bounded
 set of Reddit thread links for human review, not to monitor or mine Reddit at
 scale.
+
+This branch uses Arctic Shift (https://arctic-shift.photon-reddit.com) instead
+of the Reddit official API. No credentials are required.
 """
 
 from __future__ import annotations
 
 
 # ---------------------------------------------------------------------
+# Arctic Shift API
+# ---------------------------------------------------------------------
+
+# Base URL for the Arctic Shift public API.
+# Arctic Shift is an independent open source project making archived Reddit
+# data accessible. It is not affiliated with Reddit.
+# See: https://github.com/ArthurHeitmann/arctic_shift
+ARCTIC_SHIFT_BASE_URL = "https://arctic-shift.photon-reddit.com/api"
+
+# User-Agent sent with all Arctic Shift requests.
+# Identifies the tool so the server operator can understand traffic patterns.
+ARCTIC_SHIFT_USER_AGENT = "reddit-thread-finder/arctic-shift-backend (github.com/Eyskiracing/reddit-thread-finder)"
+
+# Request timeout in seconds. Arctic Shift documentation notes that complex
+# queries can take over 5 seconds. This ceiling gives headroom without
+# hanging indefinitely.
+ARCTIC_SHIFT_TIMEOUT_SECONDS = 30
+
+# Approximate data lag for Arctic Shift. Posts from within this many days of
+# today may be missing or incomplete. Used to warn users when from_date is
+# very recent.
+ARCTIC_SHIFT_DATA_LAG_DAYS = 30
+
+# ---------------------------------------------------------------------
 # Abuse-prevention / purpose-limitation guardrails
 # ---------------------------------------------------------------------
 
 MAX_TOP_K = 100
-MAX_SUBREDDITS = 5
+# Increased from 5 to 10 to support subreddit discovery results.
+MAX_SUBREDDITS = 10
 MAX_QUERY_VARIANTS = 8
 MAX_CANDIDATE_LIMIT_PER_SEARCH = 100
 MAX_SEARCH_OPERATIONS = 40
 MAX_UNIQUE_CANDIDATES = 1000
+
+# Subreddit discovery limits
+MAX_DISCOVERY_CANDIDATES = 20
+MAX_DISCOVERY_VALIDATION_POSTS = 5
 
 DEFAULT_DELAY_SECONDS = 0.25
 DEFAULT_RATE_LIMIT_BACKOFF_SECONDS = 60
